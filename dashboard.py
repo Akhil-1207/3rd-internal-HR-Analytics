@@ -11,145 +11,112 @@ Original file is located at
 # Streamlit app that FIRST asks user to upload a CSV, then builds LPA + ML pipeline and shows dashboard.
 # Place this file in a folder where you can run: `streamlit run app.py`
 
-!pip install streamlit
-
 import streamlit as st
 import pandas as pd
 import numpy as np
-import io
 import joblib
-import os
-import matplotlib.pyplot as plt
 import plotly.express as px
 import plotly.graph_objects as go
 from sklearn.preprocessing import StandardScaler
 from sklearn.mixture import GaussianMixture
-from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.ensemble import RandomForestClassifier
-from xgboost import XGBClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, roc_auc_score, precision_score, recall_score, f1_score, confusion_matrix, roc_curve, auc
-from statsmodels.stats.outliers_influence import variance_inflation_factor
-import scipy.sparse as sp
-import shap
-import warnings
-warnings.filterwarnings("ignore")
 
-st.set_page_config(layout="wide", page_title="Upload -> Build Hybrid Profiling Dashboard")
-st.title("Upload CSV → Build Hybrid LPA + ML Dashboard")
-st.markdown("**Step 1:** Upload your employee dataset (CSV). The app will validate columns, run LPA, train models, evaluate, and build a dashboard.")
+st.set_page_config(page_title="LPA + ML Dashboard", layout="wide")
+
+st.title("🚀 Employee Profiling Dashboard (LPA + ML Predictions)")
+st.write("Upload your dataset and analyze employee profiles instantly.")
 
 # -------------------------
-# Helper: required columns
+# Upload Dataset
 # -------------------------
-REQUIRED_COLS = [
-    'EmployeeID','Age','TenureMonths','Department','Gender',
-    'PerformanceScore','Satisfaction','Engagement','Motivation','Stress','WorkLifeBalance',
-    'OvertimeHours','TrainingHoursLastYear','AbsenteeismDays','PeerRating','ManagerRating','ProjectLoad',
-    # Optional target columns expected for building models:
-    'Attrition' # Added Attrition here for dummy data generation
-]
+uploaded = st.file_uploader("Upload your CSV", type=["csv"])
 
-# Path for the default file
-default_file_path = 'employee_profiles_synthetic.csv'
-
-# Check if the default file exists, if not, create a dummy one
-if not os.path.exists(default_file_path):
-    st.warning(f"'{default_file_path}' not found. Creating a dummy CSV for demonstration purposes.")
-
-    # Ensure any old file is removed if it's being regenerated
-    if os.path.exists(default_file_path):
-        os.remove(default_file_path)
-
-    dummy_data = {col: [] for col in REQUIRED_COLS}
-    num_rows = 200 # Increased for more robust splitting and model training, was 100
-    dummy_data['EmployeeID'] = range(1, num_rows + 1)
-    dummy_data['Age'] = np.random.randint(22, 60, num_rows)
-    dummy_data['TenureMonths'] = np.random.randint(6, 120, num_rows)
-    dummy_data['Department'] = np.random.choice(['HR', 'Sales', 'IT', 'Marketing'], num_rows)
-    dummy_data['Gender'] = np.random.choice(['Male', 'Female'], num_rows)
-    dummy_data['PerformanceScore'] = np.random.randint(1, 5, num_rows)
-    dummy_data['Satisfaction'] = np.random.randint(1, 5, num_rows)
-    dummy_data['Engagement'] = np.random.randint(1, 5, num_rows)
-    dummy_data['Motivation'] = np.random.randint(1, 5, num_rows)
-    dummy_data['Stress'] = np.random.randint(1, 5, num_rows)
-    dummy_data['WorkLifeBalance'] = np.random.randint(1, 5, num_rows)
-    dummy_data['OvertimeHours'] = np.random.randint(0, 40, num_rows)
-    dummy_data['TrainingHoursLastYear'] = np.random.randint(0, 100, num_rows)
-    dummy_data['AbsenteeismDays'] = np.random.randint(0, 15, num_rows)
-    dummy_data['PeerRating'] = np.random.randint(1, 5, num_rows)
-    dummy_data['ManagerRating'] = np.random.randint(1, 5, num_rows)
-    dummy_data['ProjectLoad'] = np.random.randint(1, 10, num_rows)
-
-    # Ensure at least one of each class for 'Attrition' for model training purposes
-    attrition_values = np.random.choice([0, 1], num_rows, p=[0.8, 0.2])
-    # Robustly ensure both classes are present
-    if 0 not in attrition_values:
-        attrition_values[0] = 0 # Ensure the first element is 0 if not already present
-    if 1 not in attrition_values:
-        attrition_values[1] = 1 # Ensure the second element is 1 if not already present
-    dummy_data['Attrition'] = attrition_values
-
-    dummy_df = pd.DataFrame(dummy_data)
-    dummy_df.to_csv(default_file_path, index=False)
-    st.success(f"Dummy '{default_file_path}' created with {num_rows} rows.")
-
-# -------------------------
-# File uploader (first thing)
-# -------------------------
-uploaded = st.file_uploader("Upload your employee CSV file (must contain required columns).", type=['csv'])
-
-# Try to load a default file if not running as a full Streamlit app or no file uploaded
 if uploaded is None:
-    try:
-        # Assuming a default file 'employee_profiles_synthetic.csv' is available
-        # from previous steps or uploaded by the user.
-        df = pd.read_csv(default_file_path)
-        st.info(f"No file uploaded via Streamlit UI. Loading '{default_file_path}' as default with {df.shape[0]} rows for Colab execution.")
-    except FileNotFoundError:
-        st.error(f"No CSV file uploaded and '{default_file_path}' not found. Please upload a CSV file or ensure it exists in your Colab environment.")
-        raise # Re-raise if default file is truly missing, stopping execution
-else:
-    # read CSV from uploader
-    try:
-        df = pd.read_csv(uploaded)
-    except Exception as e:
-        st.error(f"Could not read uploaded CSV file: {e}")
-        raise # Re-raise the exception to halt execution if reading fails
-
-st.success(f"Loaded dataset with {df.shape[0]} rows and {df.shape[1]} columns.")
-
-# -------------------------
-# Validate required columns
-# -------------------------
-missing = [c for c in REQUIRED_COLS if c not in df.columns]
-if missing:
-    st.error("The uploaded CSV is missing required columns. Please include these columns and re-upload:")
-    st.write(missing)
+    st.info("Please upload a dataset to continue.")
     st.stop()
 
-# If target Attrition not present, warn and add synthetic target? We'll require Attrition for modelling.
-if 'Attrition' not in df.columns:
-    st.warning("Column 'Attrition' not found. Model training for attrition will be skipped unless you upload a dataset with this column.")
-    has_attrition = False
-else:
-    has_attrition = True
+df = pd.read_csv(uploaded)
+st.success(f"Uploaded dataset with {df.shape[0]} rows and {df.shape[1]} columns.")
 
-# Basic cleaning: keep required + potential targets and reasonable columns if extra present
-# ensure correct dtypes for some columns
-df['EmployeeID'] = df['EmployeeID'].astype(int)
-# Try to coerce numeric columns
-num_columns_guess = ['Age','TenureMonths','PerformanceScore','Satisfaction','Engagement','Motivation','Stress','WorkLifeBalance',
-                     'OvertimeHours','TrainingHoursLastYear','AbsenteeismDays','PeerRating','ManagerRating','ProjectLoad']
-for c in num_columns_guess:
-    if c in df.columns:
-        df[c] = pd.to_numeric(df[c], errors='coerce')
+st.dataframe(df.head())
 
-# Fill small missing values for demonstration (we'll also handle via pipeline)
-st.write("### Sample rows")
-st.dataframe(df.head(5))
+# -------------------------
+# Run LPA (FAST)
+# -------------------------
+st.subheader("🎯 Latent Profile Analysis (LPA)")
 
+lpa_features = [
+    "PerformanceScore","Satisfaction","Engagement",
+    "Motivation","Stress","WorkLifeBalance"
+]
+
+X = df[lpa_features].dropna()
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+gmm = GaussianMixture(n_components=3, random_state=42)
+df["LPA_Profile"] = gmm.fit_predict(X_scaled)
+
+st.success("LPA completed successfully!")
+
+# -------------------------
+# Load Pretrained Model
+# -------------------------
+st.subheader("🤖 Load ML Model")
+
+try:
+    model = joblib.load("best_model_attrition.joblib")
+    preprocessor = joblib.load("preprocessor.joblib")
+except:
+    st.error("❌ Missing model artifacts. Upload best_model_attrition.joblib & preprocessor.joblib to the same folder.")
+    st.stop()
+
+# -------------------------
+# KPI CARDS
+# -------------------------
+col1, col2, col3, col4 = st.columns(4)
+
+col1.metric("Avg Satisfaction", f"{df['Satisfaction'].mean():.2f}")
+col2.metric("Avg Performance", f"{df['PerformanceScore'].mean():.2f}")
+col3.metric("Profiles", df["LPA_Profile"].nunique())
+col4.metric("Employees", df.shape[0])
+
+# -------------------------
+# Plot Profile Distribution
+# -------------------------
+st.subheader("📊 LPA Profile Distribution")
+
+fig1 = px.bar(df["LPA_Profile"].value_counts().reset_index(),
+              x="index", y="LPA_Profile",
+              title="Employees per Profile")
+st.plotly_chart(fig1, use_container_width=True)
+
+# -------------------------
+# Employee Drilldown
+# -------------------------
+st.subheader("🔍 Employee Drilldown")
+
+emp_id = st.selectbox("Select EmployeeID", df["EmployeeID"].unique())
+emp_row = df[df["EmployeeID"] == emp_id]
+
+st.write(emp_row)
+
+# -------------------------
+# Prediction
+# -------------------------
+st.subheader("🔮 Attrition Prediction")
+
+features_needed = preprocessor.feature_names_in_
+X_emp = preprocessor.transform(emp_row[features_needed])
+prob = model.predict_proba(X_emp)[0,1]
+label = "High Risk" if prob >= 0.5 else "Low Risk"
+
+st.write(f"Prediction: **{label}**")
+gauge = go.Figure(go.Indicator(
+    mode="gauge+number",
+    value=prob*100,
+    title={'text': "Attrition Risk (%)"},
+    gauge={'axis': {'range': [0,100]}}
+))
+st.plotly_chart(gauge, use_container_width=True)
+
+st.success("Dashboard Ready!")
