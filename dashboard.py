@@ -11,112 +11,136 @@ Original file is located at
 # Streamlit app that FIRST asks user to upload a CSV, then builds LPA + ML pipeline and shows dashboard.
 # Place this file in a folder where you can run: `streamlit run app.py`
 
+
 import streamlit as st
 import pandas as pd
-import numpy as np
 import joblib
 import plotly.express as px
 import plotly.graph_objects as go
-from sklearn.preprocessing import StandardScaler
-from sklearn.mixture import GaussianMixture
 
-st.set_page_config(page_title="LPA + ML Dashboard", layout="wide")
+st.set_page_config(page_title="Employee Profiling Dashboard", layout="wide")
 
-st.title("🚀 Employee Profiling Dashboard (LPA + ML Predictions)")
-st.write("Upload your dataset and analyze employee profiles instantly.")
+st.title("🚀 Employee Profiling & Attrition Prediction Dashboard")
+st.write("Upload a preprocessed dataset (final_dataset.csv) that includes LPA_Profile.")
 
-# -------------------------
-# Upload Dataset
-# -------------------------
-uploaded = st.file_uploader("Upload your CSV", type=["csv"])
+# -----------------------------------------------------
+# FILE UPLOADER
+# -----------------------------------------------------
+uploaded = st.file_uploader("Upload preprocessed employee dataset", type=["csv"])
 
 if uploaded is None:
-    st.info("Please upload a dataset to continue.")
+    st.info("Please upload final_dataset.csv (from training script).")
     st.stop()
 
 df = pd.read_csv(uploaded)
-st.success(f"Uploaded dataset with {df.shape[0]} rows and {df.shape[1]} columns.")
+st.success(f"Dataset loaded: {df.shape[0]} rows, {df.shape[1]} columns")
 
+# Show preview
 st.dataframe(df.head())
 
-# -------------------------
-# Run LPA (FAST)
-# -------------------------
-st.subheader("🎯 Latent Profile Analysis (LPA)")
-
-lpa_features = [
-    "PerformanceScore","Satisfaction","Engagement",
-    "Motivation","Stress","WorkLifeBalance"
-]
-
-X = df[lpa_features].dropna()
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
-
-gmm = GaussianMixture(n_components=3, random_state=42)
-df["LPA_Profile"] = gmm.fit_predict(X_scaled)
-
-st.success("LPA completed successfully!")
-
-# -------------------------
-# Load Pretrained Model
-# -------------------------
-st.subheader("🤖 Load ML Model")
-
+# -----------------------------------------------------
+# LOAD MODEL + PREPROCESSOR
+# -----------------------------------------------------
 try:
-    model = joblib.load("best_model_attrition.joblib")
+    model = joblib.load("best_model.joblib")
     preprocessor = joblib.load("preprocessor.joblib")
+    st.success("Model & Preprocessor Loaded Successfully!")
 except:
-    st.error("❌ Missing model artifacts. Upload best_model_attrition.joblib & preprocessor.joblib to the same folder.")
+    st.error("❌ best_model.joblib or preprocessor.joblib not found in app folder.")
     st.stop()
 
-# -------------------------
+# -----------------------------------------------------
 # KPI CARDS
-# -------------------------
+# -----------------------------------------------------
+st.markdown("## 📊 Key Metrics")
+
 col1, col2, col3, col4 = st.columns(4)
 
-col1.metric("Avg Satisfaction", f"{df['Satisfaction'].mean():.2f}")
-col2.metric("Avg Performance", f"{df['PerformanceScore'].mean():.2f}")
-col3.metric("Profiles", df["LPA_Profile"].nunique())
-col4.metric("Employees", df.shape[0])
+col1.metric("Total Employees", df.shape[0])
+col2.metric("Profiles", df["LPA_Profile"].nunique())
+col3.metric("Avg Satisfaction", f"{df['Satisfaction'].mean():.2f}")
+col4.metric("Avg Performance", f"{df['PerformanceScore'].mean():.2f}")
 
-# -------------------------
-# Plot Profile Distribution
-# -------------------------
-st.subheader("📊 LPA Profile Distribution")
+st.markdown("---")
 
-fig1 = px.bar(df["LPA_Profile"].value_counts().reset_index(),
-              x="index", y="LPA_Profile",
-              title="Employees per Profile")
+# -----------------------------------------------------
+# LPA PROFILE DISTRIBUTION
+# -----------------------------------------------------
+st.subheader("📌 LPA Profile Distribution")
+
+profile_counts = df["LPA_Profile"].value_counts().reset_index()
+profile_counts.columns = ["LPA_Profile", "Count"]
+
+fig1 = px.bar(profile_counts, x="LPA_Profile", y="Count",
+              title="Employees Per Latent Profile",
+              color="LPA_Profile", text="Count")
 st.plotly_chart(fig1, use_container_width=True)
 
-# -------------------------
-# Employee Drilldown
-# -------------------------
-st.subheader("🔍 Employee Drilldown")
+# -----------------------------------------------------
+# PERFORMANCE vs SATISFACTION
+# -----------------------------------------------------
+st.subheader("📈 Performance vs Satisfaction (Colored by Profile)")
 
-emp_id = st.selectbox("Select EmployeeID", df["EmployeeID"].unique())
-emp_row = df[df["EmployeeID"] == emp_id]
+fig2 = px.scatter(df,
+                  x="PerformanceScore",
+                  y="Satisfaction",
+                  color="LPA_Profile",
+                  hover_data=["EmployeeID", "Department"])
+st.plotly_chart(fig2, use_container_width=True)
 
-st.write(emp_row)
+# -----------------------------------------------------
+# EMPLOYEE DRILLDOWN
+# -----------------------------------------------------
+st.subheader("👤 Employee Drilldown")
 
-# -------------------------
-# Prediction
-# -------------------------
+selected_emp = st.selectbox("Select EmployeeID", df["EmployeeID"].unique())
+emp_row = df[df["EmployeeID"] == selected_emp]
+
+st.write("### Employee Details")
+st.dataframe(emp_row)
+
+# -----------------------------------------------------
+# ATTRITION PREDICTION
+# -----------------------------------------------------
 st.subheader("🔮 Attrition Prediction")
 
 features_needed = preprocessor.feature_names_in_
+
 X_emp = preprocessor.transform(emp_row[features_needed])
-prob = model.predict_proba(X_emp)[0,1]
+prob = model.predict_proba(X_emp)[0, 1]
 label = "High Risk" if prob >= 0.5 else "Low Risk"
 
-st.write(f"Prediction: **{label}**")
+st.write(f"### Prediction: **{label}**")
+st.write(f"Probability: **{prob:.4f}**")
+
+# Gauge Chart
 gauge = go.Figure(go.Indicator(
     mode="gauge+number",
-    value=prob*100,
+    value=prob * 100,
     title={'text': "Attrition Risk (%)"},
-    gauge={'axis': {'range': [0,100]}}
+    gauge={'axis': {'range': [0, 100]}}
 ))
 st.plotly_chart(gauge, use_container_width=True)
 
-st.success("Dashboard Ready!")
+# -----------------------------------------------------
+# MODEL PERFORMANCE SUMMARY
+# -----------------------------------------------------
+st.subheader("📘 Model Performance Summary")
+
+try:
+    metrics_df = pd.read_csv("model_results_summary.csv")
+    st.dataframe(metrics_df)
+except:
+    st.warning("model_results_summary.csv not found — skipping.")
+
+# -----------------------------------------------------
+# SHAP UPLOAD AREA
+# -----------------------------------------------------
+st.subheader("🧠 SHAP Explainability (Optional)")
+
+shap_img = st.file_uploader("Upload SHAP summary image (PNG/JPG)", type=["png", "jpg"])
+
+if shap_img:
+    st.image(shap_img, caption="SHAP Feature Importance", use_column_width=True)
+
+st.success("Dashboard Loaded Successfully!")
